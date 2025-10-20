@@ -164,6 +164,8 @@ interface TableProps {
   headerTextColor?: string
   elevation?: number | string
   borderless?: boolean
+  excludeKeys?: string[]
+  additionalHeaders?: GenericTableHeader[]
 }
 
 const props = withDefaults(defineProps<TableProps>(), {
@@ -187,7 +189,9 @@ const props = withDefaults(defineProps<TableProps>(), {
   headerColor: undefined,
   headerTextColor: undefined,
   elevation: 1,
-  borderless: false
+  borderless: false,
+  excludeKeys: () => [],
+  additionalHeaders: () => []
 })
 
 const emit = defineEmits<{ (event: 'row-click', item: GenericTableItem): void }>()
@@ -371,25 +375,40 @@ const alignmentClass = (align: Align | undefined) => {
   }
 }
 
+const excludedKeySet = computed(() => {
+  const rawKeys = props.excludeKeys ?? []
+  return new Set(rawKeys.map(key => normalizeKey(key).toLowerCase()))
+})
+
 const autoGenerateHeaders = (items: GenericTableItem[]): GenericTableHeader[] => {
   const sample = items[0]
   if (!sample) {
     return []
   }
   const container = resolveContainer(sample)
-  return Object.keys(container).map(key => ({
-    key,
-    title: humanizeKey(key),
-    align: 'start' as const,
-    sortable: false
-  }))
+  return Object.keys(container)
+    .filter(key => !excludedKeySet.value.has(normalizeKey(key).toLowerCase()))
+    .map(key => ({
+      key,
+      title: humanizeKey(key),
+      align: 'start' as const,
+      sortable: false
+    }))
 }
 
 const computedHeaders = computed<GenericTableHeader[]>(() => {
-  if (props.headers && props.headers.length > 0) {
-    return props.headers
+  const manualHeaders = props.headers ?? []
+  if (manualHeaders.length > 0) {
+    return manualHeaders
   }
-  return autoGenerateHeaders(tableItems.value)
+  const autoHeaders = autoGenerateHeaders(tableItems.value)
+  const appended = props.additionalHeaders ?? []
+  if (!appended.length) {
+    return autoHeaders
+  }
+  const existingKeys = new Set(autoHeaders.map(header => normalizeKey(header.key)))
+  const extras = appended.filter(header => !existingKeys.has(normalizeKey(header.key)))
+  return [...autoHeaders, ...extras]
 })
 
 const resolveRowKey = (item: GenericTableItem, index: number) => {
