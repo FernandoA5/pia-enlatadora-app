@@ -43,9 +43,14 @@ export const useMateriaPrimaApi = () => {
     })
   }
 
+  const deactivateMateriaPrima = async (id: string | number) => {
+    return updateMateriaPrima(id, { activo: false })
+  }
+
   return {
     listMateriasPrimas,
     createMateriaPrima,
     updateMateriaPrima,
+    deactivateMateriaPrima
   }
 }

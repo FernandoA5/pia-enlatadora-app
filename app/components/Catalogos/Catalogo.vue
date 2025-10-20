@@ -3,7 +3,7 @@
     <div class="catalog-wrapper">
       <CatalogTools
         v-model="searchQuery"
-        :loading="loadingTable"
+        :loading="loading"
         :placeholder="searchPlaceholder"
         @clear="clearFilters"
         @reload="handleReload"
@@ -12,7 +12,7 @@
 
       <Tabla
         :items="filteredItems"
-        :loading="loadingTable"
+        :loading="loading"
         :items-per-page="itemsPerPage"
         :items-per-page-options="itemsPerPageOptions"
         :mobile-breakpoint="mobileBreakpoint"
@@ -64,7 +64,6 @@
               <Icon name="mdi:pencil" class="action-button__icon" aria-hidden="true" />
             </button>
             <button
-              v-if="softDeleteField"
               type="button"
               class="action-button action-button--delete"
               aria-label="Eliminar"
@@ -83,7 +82,6 @@
         :visible="showRegisterModal"
         :set-visible="setModalVisible"
         :selected-item="selectedItem"
-        :loading="modalLoading"
         :submit="handleRegisterSubmit"
       />
     </div>
@@ -91,23 +89,17 @@
 </template>
 
 <script lang="ts" setup>
-import { computed, onMounted, ref, toRefs, useSlots, watch } from 'vue'
+import { computed, ref, toRefs, useSlots } from 'vue'
 import CatalogTools from '~/components/Genericos/Catalogos/Tools.vue'
 import Tabla from '~/components/Genericos/Tablas/Tabla.vue'
 import type { GenericTableHeader, GenericTableItem } from '~/components/Genericos/Tablas/Tabla.vue'
-import { useNuxtApp } from 'nuxt/app'
 
-type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
+const BASE_EXCLUDED_COLUMNS = ['id', 'inserted_at', 'updated_at', 'activo']
 
 const props = withDefaults(
   defineProps<{
-    listEndpoint: string
-    createEndpoint: string
-    updateEndpoint: string
-    resourceKey: string
-    listMethod?: HttpMethod
-    createMethod?: HttpMethod
-    updateMethod?: HttpMethod
+    items: GenericTableItem[]
+    loading?: boolean
     searchPlaceholder?: string
     itemsPerPage?: number
     itemsPerPageOptions?: number[]
@@ -122,28 +114,19 @@ const props = withDefaults(
     fixedHeader?: boolean
     headerColor?: string
     headerTextColor?: string
-    softDeleteField?: string | null
-    softDeleteValue?: boolean | string | number | null
-    transformList?: (response: unknown) => GenericTableItem[]
-    transformPayload?: (
-      data: Record<string, unknown>,
-      context: { mode: 'create' | 'update'; id?: string | number | null }
-    ) => Record<string, unknown>
     extractItemId?: (item: GenericTableItem) => string | number | null
     searchKeys?: string[]
     defaultSearchKeys?: string[]
-    disableAutoFetch?: boolean
   }>(),
   {
-    listMethod: 'GET',
-    createMethod: 'POST',
-    updateMethod: 'PUT',
+    items: () => [],
+    loading: false,
     searchPlaceholder: 'Buscar en catálogo',
     itemsPerPage: 8,
     itemsPerPageOptions: () => [5, 8, 12, 20] as number[],
     mobileBreakpoint: 640,
     tableHeight: '28rem',
-    excludedColumns: () => ['id', 'inserted_at', 'updated_at', 'activo','unidad_medida'] as string[],
+    excludedColumns: () => [] as string[],
     additionalHeaders: () => [{ key: 'actions', title: 'Acciones', align: 'end', width: '144px' }] as GenericTableHeader[],
     enableActions: true,
     enableRowClick: true,
@@ -151,46 +134,27 @@ const props = withDefaults(
     hover: true,
     fixedHeader: true,
     headerColor: 'var(--ui-primary-100)',
-    headerTextColor: 'var(--ui-primary-900)',
-    softDeleteField: 'activo',
-    softDeleteValue: false,
-    disableAutoFetch: false
+    headerTextColor: 'var(--ui-primary-900)'
   }
 )
 
 const emit = defineEmits<{
-  (event: 'fetch:success', items: GenericTableItem[]): void
-  (event: 'fetch:error', error: unknown): void
-  (event: 'submit:success', payload: { mode: 'create' | 'update'; id?: string | number | null }): void
-  (event: 'submit:error', error: unknown): void
-  (event: 'delete:success', payload: { id: string | number | null }): void
-  (event: 'delete:error', error: unknown): void
+  (event: 'add'): void
+  (event: 'edit', item: GenericTableItem): void
+  (event: 'delete', item: GenericTableItem): void
+  (event: 'submit', payload: { data: Record<string, unknown>; id?: string | number | null; closeModal: () => void }): void
+  (event: 'reload'): void
   (event: 'row-click', item: GenericTableItem): void
 }>()
 
 const slots = useSlots()
 const {
-  listEndpoint,
-  createEndpoint,
-  updateEndpoint,
-  listMethod,
-  createMethod,
-  updateMethod,
   searchKeys,
   defaultSearchKeys,
-  transformList,
-  transformPayload,
-  extractItemId,
-  softDeleteField,
-  softDeleteValue
+  extractItemId
 } = toRefs(props)
 
-const { $api } = useNuxtApp()
-
 const searchQuery = ref('')
-const loadingTable = ref(false)
-const modalLoading = ref(false)
-const tableItems = ref<GenericTableItem[]>([])
 const showRegisterModal = ref(false)
 const selectedItem = ref<GenericTableItem | null>(null)
 const deletingIds = ref(new Set<string | number>())
@@ -210,7 +174,10 @@ const headerColor = computed(() => props.headerColor)
 const headerTextColor = computed(() => props.headerTextColor)
 const enableActions = computed(() => props.enableActions)
 
-const computedExcludedColumns = computed<string[]>(() => props.excludedColumns ?? [])
+const computedExcludedColumns = computed<string[]>(() => {
+  const extras = props.excludedColumns ?? []
+  return Array.from(new Set([...BASE_EXCLUDED_COLUMNS, ...extras]))
+})
 const computedAdditionalHeaders = computed<GenericTableHeader[]>(() => props.additionalHeaders ?? [])
 const searchPlaceholder = computed(() => props.searchPlaceholder)
 
@@ -228,7 +195,7 @@ const forwardedSlotNames = computed(() => {
 })
 
 const availableKeys = computed(() => {
-  const sample = tableItems.value[0]
+  const sample = props.items[0]
   if (!sample) {
     return [] as string[]
   }
@@ -243,62 +210,33 @@ const effectiveSearchKeys = computed(() => {
   if (defaultSearchKeys.value && defaultSearchKeys.value.length) {
     return defaultSearchKeys.value
   }
-  const sample = tableItems.value[0] ?? {}
+  const sample = props.items[0] ?? {}
   return availableKeys.value.filter(key => typeof (sample as Record<string, unknown>)[key] === 'string')
 })
 
 const filteredItems = computed(() => {
   const term = searchQuery.value.trim().toLowerCase()
   if (!term) {
-    return tableItems.value
+    return props.items
   }
-  return tableItems.value.filter(item =>
+  return props.items.filter(item =>
     effectiveSearchKeys.value.some(key => String(item[key as keyof typeof item] ?? '').toLowerCase().includes(term))
   )
 })
 
-const setTableItems = (items: GenericTableItem[]) => {
-  tableItems.value = items
-}
-
-const fetchItems = async () => {
-  if (loadingTable.value) {
-    return
-  }
-  loadingTable.value = true
-  try {
-    const response = await $api(listEndpoint.value, {
-      method: listMethod.value
-    })
-    const raw = transformList.value ? transformList.value(response) : ((response as any)?.data ?? response)
-    const items = Array.isArray(raw) ? (raw as GenericTableItem[]) : []
-    setTableItems(items)
-    emit('fetch:success', items)
-  } catch (error) {
-    emit('fetch:error', error)
-    setTableItems([])
-  } finally {
-    loadingTable.value = false
-  }
-}
-
-if (!props.disableAutoFetch) {
-  onMounted(fetchItems)
-}
 
 const clearFilters = () => {
   searchQuery.value = ''
 }
 
 const handleReload = () => {
-  if (!loadingTable.value) {
-    fetchItems()
-  }
+  emit('reload')
 }
 
 const handleAdd = () => {
   selectedItem.value = null
   showRegisterModal.value = true
+  emit('add')
 }
 
 const handleRowClick = (item: GenericTableItem) => {
@@ -339,6 +277,7 @@ const getItemId = (item: GenericTableItem | null | undefined) => {
 const handleEdit = (item: GenericTableItem) => {
   selectedItem.value = { ...item }
   showRegisterModal.value = true
+  emit('edit', item)
 }
 
 const isItemActionLoading = (item: GenericTableItem) => {
@@ -349,65 +288,16 @@ const isItemActionLoading = (item: GenericTableItem) => {
   return deletingIds.value.has(id)
 }
 
-const handleDelete = async (item: GenericTableItem) => {
+const handleDelete = (item: GenericTableItem) => {
   const id = getItemId(item)
-  if (id == null || !softDeleteField.value) {
+  if (id == null) {
     return
   }
-  deletingIds.value.add(id)
-  try {
-    await $api(`${updateEndpoint.value}/${id}`, {
-      method: updateMethod.value,
-      body: {
-        [props.resourceKey]: {
-          [softDeleteField.value]: softDeleteValue.value
-        }
-      }
-    })
-    deletingIds.value.delete(id)
-    emit('delete:success', { id })
-    await fetchItems()
-  } catch (error) {
-    deletingIds.value.delete(id)
-    emit('delete:error', error)
-  }
+  emit('delete', item)
 }
 
-const modalSubmit = async ({ data, id }: { data: Record<string, unknown>; id?: string | number | null }) => {
-  if (modalLoading.value) {
-    return
-  }
-  modalLoading.value = true
-  const mode: 'create' | 'update' = id != null ? 'update' : 'create'
-  try {
-    const payload = transformPayload.value
-      ? transformPayload.value(data, { mode, id })
-      : data
-
-    if (mode === 'update' && id != null) {
-      await $api(`${updateEndpoint.value}/${id}`, {
-        method: updateMethod.value,
-        body: {
-          [props.resourceKey]: payload
-        }
-      })
-    } else {
-      await $api(createEndpoint.value, {
-        method: createMethod.value,
-        body: {
-          [props.resourceKey]: payload
-        }
-      })
-    }
-
-    emit('submit:success', { mode, id: id ?? null })
-    setModalVisible(false)
-    await fetchItems()
-  } catch (error) {
-    emit('submit:error', error)
-  } finally {
-    modalLoading.value = false
-  }
+const modalSubmit = ({ data, id }: { data: Record<string, unknown>; id?: string | number | null }) => {
+  emit('submit', { data, id, closeModal: () => setModalVisible(false) })
 }
 
 const handleRegisterSubmit = (payload: { data: Record<string, unknown>; id?: string | number | null }) => {

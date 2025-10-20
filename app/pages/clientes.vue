@@ -1,14 +1,13 @@
 <template>
   <Catalogo
-    list-endpoint="/api/clientes"
-    create-endpoint="/api/clientes"
-    update-endpoint="/api/clientes"
-    resource-key="cliente"
+    :items="clientes"
+    :loading="loading"
     search-placeholder="Buscar cliente"
     :search-keys="searchKeys"
-    :transform-payload="transformPayload"
-    :transform-list="transformList"
     :extract-item-id="extractId"
+    @reload="handleReload"
+    @submit="handleSubmit"
+    @delete="handleDelete"
   >
     <template #item.telefono="{ value }">
       <span>{{ value || 'Sin teléfono' }}</span>
@@ -44,11 +43,11 @@
       </span>
     </template>
 
-    <template #modal="{ visible, setVisible, selectedItem, loading, submit }">
+    <template #modal="{ visible, setVisible, selectedItem, submit }">
       <ClienteModal
         :model-value="visible"
         :cliente="selectedItem"
-        :loading="loading"
+        :loading="modalLoading"
         @update:modelValue="setVisible"
         @submit="submit"
         :resizable="true"
@@ -64,34 +63,84 @@
 </template>
 
 <script setup lang="ts">
+import { ref, onMounted } from 'vue'
 import Catalogo from '~/components/Catalogos/Catalogo.vue'
 import ClienteModal from '~/components/Catalogos/Clientes/Modales/Registrar.vue'
 import type { GenericTableItem } from '~/components/Genericos/Tablas/Tabla.vue'
+import { useClientesApi } from '~/composables/useClientesApi'
 
 const searchKeys = ['nombre', 'telefono', 'direccion', 'correo']
 
-const transformPayload = (
-  data: Record<string, unknown>,
-  _context: { mode: 'create' | 'update'; id?: string | number | null }
-) => ({
-  nombre: String(data.nombre ?? '').trim(),
-  telefono: data.telefono ? String(data.telefono).trim() : null,
-  direccion: data.direccion ? String(data.direccion).trim() : null,
-  correo: data.correo ? String(data.correo).trim() : null,
-  activo: data.activo !== undefined ? Boolean(data.activo) : true
-})
+const { listClientes, createCliente, updateCliente, deactivateCliente } = useClientesApi()
+const clientes = ref<GenericTableItem[]>([])
+const loading = ref(false)
+const modalLoading = ref(false)
 
-const transformList = (response: unknown) => {
-  const raw = (response as { data?: unknown }).data ?? response
-  if (!Array.isArray(raw)) {
-    return []
+const fetchClientes = async () => {
+  loading.value = true
+  try {
+    const response = await listClientes()
+    const raw = (response as { data?: unknown }).data ?? response
+    if (Array.isArray(raw)) {
+      clientes.value = (raw as GenericTableItem[]).filter(item => {
+        const record = item as Record<string, unknown>
+        const activo = record.activo ?? (record.value as Record<string, unknown> | undefined)?.activo
+        return activo !== false
+      })
+    }
+  } catch (error) {
+    console.error('Error al cargar clientes:', error)
+    clientes.value = []
+  } finally {
+    loading.value = false
   }
-  return (raw as GenericTableItem[]).filter(item => {
-    const record = item as Record<string, unknown>
-    const activo = record.activo ?? (record.value as Record<string, unknown> | undefined)?.activo
-    return activo !== false
-  })
 }
+
+const handleReload = () => {
+  fetchClientes()
+}
+
+const handleSubmit = async ({ data, id, closeModal }: { data: Record<string, unknown>; id?: string | number | null; closeModal: () => void }) => {
+  modalLoading.value = true
+  try {
+    const payload = {
+      nombre: String(data.nombre ?? '').trim(),
+      telefono: data.telefono ? String(data.telefono).trim() : null,
+      direccion: data.direccion ? String(data.direccion).trim() : null,
+      correo: data.correo ? String(data.correo).trim() : null,
+      activo: data.activo !== undefined ? Boolean(data.activo) : true
+    }
+
+    if (id != null) {
+      await updateCliente(id, payload)
+    } else {
+      await createCliente(payload)
+    }
+
+    await fetchClientes()
+    closeModal()
+  } catch (error) {
+    console.error('Error al guardar cliente:', error)
+  } finally {
+    modalLoading.value = false
+  }
+}
+
+const handleDelete = async (item: GenericTableItem) => {
+  const id = extractId(item)
+  if (id == null) return
+
+  try {
+    await deactivateCliente(id)
+    await fetchClientes()
+  } catch (error) {
+    console.error('Error al eliminar cliente:', error)
+  }
+}
+
+onMounted(() => {
+  fetchClientes()
+})
 
 const extractId = (item: GenericTableItem) => {
   const record = item as Record<string, unknown>

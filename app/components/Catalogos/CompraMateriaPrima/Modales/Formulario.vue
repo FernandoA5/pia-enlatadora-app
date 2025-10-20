@@ -7,9 +7,9 @@
     :resizable="false"
     :padded="false"
     :initial-width="680"
-    :initial-height="520"
+    :initial-height="340"
     :min-width="560"
-    :min-height="420"
+    :min-height="340"
     :top-bar-background-gradient="'linear-gradient(to right, #0f62fe, #0043ce)'"
     :top-bar-text-color="'#ffffff'"
     :show-close-button="!loading"
@@ -18,57 +18,43 @@
     <form class="modal-content" @submit.prevent="handleSubmit">
       <div class="form-grid">
         <label class="form-field">
-          <span>Nombre</span>
-          <input
-            v-model="form.nombre"
-            type="text"
-            :disabled="loading"
-            autocomplete="off"
-          >
-          <p v-if="errors.nombre" class="field-error">{{ errors.nombre }}</p>
-        </label>
-        <label class="form-field">
-          <span>Unidad de medida</span>
-          <select v-model="form.unidad_medida" :disabled="loading">
-            <option value="">Selecciona una unidad</option>
-            <option v-for="unidad in unidadOptions" :key="unidad" :value="unidad">
-              {{ unidad }}
+          <span>Proveedor</span>
+          <select v-model="form.id_proveedor" :disabled="loading">
+            <option value="">
+              Selecciona un proveedor
+            </option>
+            <option
+              v-for="option in proveedores"
+              :key="option.value"
+              :value="String(option.value)"
+            >
+              {{ option.label }}
             </option>
           </select>
-          <p v-if="errors.unidad_medida" class="field-error">{{ errors.unidad_medida }}</p>
+          <p v-if="errors.id_proveedor" class="field-error">{{ errors.id_proveedor }}</p>
         </label>
+
+        <label class="form-field">
+          <span>Fecha de compra</span>
+          <input
+            v-model="form.fecha_compra"
+            type="date"
+            :disabled="loading"
+          >
+          <p v-if="errors.fecha_compra" class="field-error">{{ errors.fecha_compra }}</p>
+        </label>
+
         <label class="form-field form-field--full">
-          <span>Descripción</span>
-          <textarea
-            v-model="form.descripcion"
-            rows="3"
-            :disabled="loading"
-          ></textarea>
-          <p v-if="errors.descripcion" class="field-error">{{ errors.descripcion }}</p>
-        </label>
-        <label class="form-field">
-          <span>Stock actual</span>
+          <span>Total</span>
           <input
-            v-model="form.stock_actual"
+            v-model="form.total"
             type="number"
             step="0.01"
             min="0"
             :disabled="loading"
             inputmode="decimal"
           >
-          <p v-if="errors.stock_actual" class="field-error">{{ errors.stock_actual }}</p>
-        </label>
-        <label class="form-field">
-          <span>Stock mínimo</span>
-          <input
-            v-model="form.stock_minimo"
-            type="number"
-            step="0.01"
-            min="0"
-            :disabled="loading"
-            inputmode="decimal"
-          >
-          <p v-if="errors.stock_minimo" class="field-error">{{ errors.stock_minimo }}</p>
+          <p v-if="errors.total" class="field-error">{{ errors.total }}</p>
         </label>
       </div>
     </form>
@@ -100,52 +86,51 @@
 import { computed, reactive, watch } from 'vue'
 import GenericModal from '~/components/Genericos/Modal/Modal.vue'
 
-type MateriaPrimaFormValues = {
-  nombre: string
-  descripcion: string
-  unidad_medida: string
-  stock_actual: string
-  stock_minimo: string
+type OptionValue = {
+  label: string
+  value: string | number
 }
 
-type MateriaPrimaInput = Partial<MateriaPrimaFormValues> & {
+type CompraMateriaPrimaForm = {
+  id_proveedor: string
+  fecha_compra: string
+  total: string
+}
+
+type CompraMateriaPrimaLike = Partial<CompraMateriaPrimaForm> & {
   id?: number | string | null
-  unidad?: unknown
-  stock?: unknown
-  stock_min?: unknown
+  activo?: boolean
 }
 
 const props = withDefaults(
   defineProps<{
     modelValue: boolean
-    materiaPrima?: MateriaPrimaInput | null
+    compra?: CompraMateriaPrimaLike | null
     loading?: boolean
+    proveedores?: OptionValue[]
   }>(),
   {
-    materiaPrima: null,
-    loading: false
+    compra: null,
+    loading: false,
+    proveedores: () => []
   }
 )
 
 const emit = defineEmits<{
   (event: 'update:modelValue', value: boolean): void
-  (event: 'submit', payload: { data: MateriaPrimaFormValues; id?: number | string | null }): void
+  (event: 'submit', payload: { data: Record<string, unknown>; id?: number | string | null }): void
 }>()
 
-const unidadOptions = ['kg', 'g', 'l', 'ml', 'pz']
-
-const form = reactive<MateriaPrimaFormValues>({
-  nombre: '',
-  descripcion: '',
-  unidad_medida: '',
-  stock_actual: '',
-  stock_minimo: ''
+const form = reactive<CompraMateriaPrimaForm>({
+  id_proveedor: '',
+  fecha_compra: '',
+  total: ''
 })
 
 const errors = reactive<Record<string, string>>({})
 
-const modalTitle = computed(() => (props.materiaPrima?.id ? 'Editar materia prima' : 'Registrar materia prima'))
-const submitLabel = computed(() => (props.materiaPrima?.id ? 'Actualizar' : 'Registrar'))
+const modalTitle = computed(() => (props.compra?.id ? 'Editar compra de materia prima' : 'Registrar compra de materia prima'))
+const submitLabel = computed(() => (props.compra?.id ? 'Actualizar' : 'Registrar'))
 
 const resetErrors = () => {
   Object.keys(errors).forEach(key => {
@@ -154,11 +139,9 @@ const resetErrors = () => {
 }
 
 const resetForm = () => {
-  form.nombre = ''
-  form.descripcion = ''
-  form.unidad_medida = ''
-  form.stock_actual = ''
-  form.stock_minimo = ''
+  form.id_proveedor = ''
+  form.fecha_compra = ''
+  form.total = ''
   resetErrors()
 }
 
@@ -169,68 +152,95 @@ const toStringValue = (value: unknown): string => {
   return String(value)
 }
 
-const applyMateriaPrima = () => {
-  const data = props.materiaPrima
+const toDateInputValue = (value: unknown): string => {
+  if (!value) {
+    return ''
+  }
+  if (value instanceof Date) {
+    return value.toISOString().slice(0, 10)
+  }
+  const stringValue = String(value)
+  if (/^\d{4}-\d{2}-\d{2}$/.test(stringValue)) {
+    return stringValue
+  }
+  const parsed = Date.parse(stringValue)
+  if (Number.isNaN(parsed)) {
+    return ''
+  }
+  return new Date(parsed).toISOString().slice(0, 10)
+}
+
+const applyCompra = () => {
+  const data = props.compra
+  
   if (!data) {
     resetForm()
     return
   }
-  form.nombre = toStringValue(data.nombre)
-  form.descripcion = toStringValue(data.descripcion)
-  form.unidad_medida = toStringValue(data.unidad_medida ?? data.unidad)
-  form.stock_actual = toStringValue(data.stock_actual ?? data.stock)
-  form.stock_minimo = toStringValue(data.stock_minimo ?? data.stock_min)
+  
+  const idProveedorRaw = data.id_proveedor
+  const idProveedorString = toStringValue(idProveedorRaw)
+  
+  
+  form.id_proveedor = idProveedorString
+  form.fecha_compra = toDateInputValue(data.fecha_compra)
+  form.total = toStringValue(data.total)
+  
+  
   resetErrors()
 }
 
-const normalizeDecimal = (value: unknown): string => {
-  const stringValue = toStringValue(value).trim()
-  return stringValue.replace(',', '.')
-}
+const normalizeDecimal = (value: unknown): string => toStringValue(value).replace(',', '.').trim()
 
 const validate = () => {
   resetErrors()
-  const nombreValue = toStringValue(form.nombre).trim()
-  if (!nombreValue) {
-    errors.nombre = 'Ingresa un nombre'
+
+  if (!toStringValue(form.id_proveedor).trim()) {
+    errors.id_proveedor = 'Selecciona un proveedor'
   }
-  const unidadMedidaValue = toStringValue(form.unidad_medida).trim()
-  if (!unidadMedidaValue) {
-    errors.unidad_medida = 'Selecciona una unidad de medida'
+
+  if (!toStringValue(form.fecha_compra).trim()) {
+    errors.fecha_compra = 'Selecciona la fecha de compra'
   }
-  const stockActualValue = toStringValue(form.stock_actual)
-  if (!stockActualValue.trim()) {
-    errors.stock_actual = 'Ingresa el stock actual'
+
+  const totalValue = toStringValue(form.total).trim()
+  if (!totalValue) {
+    errors.total = 'Ingresa el monto total'
   } else {
-    const parsed = Number.parseFloat(normalizeDecimal(stockActualValue))
+    const normalized = normalizeDecimal(totalValue)
+    const parsed = Number.parseFloat(normalized)
     if (!Number.isFinite(parsed) || parsed < 0) {
-      errors.stock_actual = 'Ingresa un valor numérico válido'
+      errors.total = 'Ingresa un valor numérico válido'
     }
   }
-  const stockMinimoValue = toStringValue(form.stock_minimo)
-  if (!stockMinimoValue.trim()) {
-    errors.stock_minimo = 'Ingresa el stock mínimo'
-  } else {
-    const parsed = Number.parseFloat(normalizeDecimal(stockMinimoValue))
-    if (!Number.isFinite(parsed) || parsed < 0) {
-      errors.stock_minimo = 'Ingresa un valor numérico válido'
-    }
-  }
+
   return Object.keys(errors).length === 0
+}
+
+const parseIdProveedor = (value: string) => {
+  if (value === '') {
+    return null
+  }
+  const numeric = Number(value)
+  if (Number.isNaN(numeric)) {
+    return value
+  }
+  return numeric
 }
 
 const handleSubmit = () => {
   if (!validate()) {
     return
   }
-  const payload: MateriaPrimaFormValues = {
-    nombre: form.nombre.trim(),
-    descripcion: form.descripcion.trim(),
-    unidad_medida: form.unidad_medida.trim(),
-    stock_actual: normalizeDecimal(form.stock_actual),
-    stock_minimo: normalizeDecimal(form.stock_minimo)
+
+  const payload: Record<string, unknown> = {
+    id_proveedor: parseIdProveedor(form.id_proveedor),
+    fecha_compra: form.fecha_compra,
+    total: Number.parseFloat(normalizeDecimal(form.total)),
+    activo: props.compra?.activo ?? true
   }
-  emit('submit', { data: payload, id: props.materiaPrima?.id ?? null })
+
+  emit('submit', { data: payload, id: props.compra?.id ?? null })
 }
 
 const handleClose = () => {
@@ -244,7 +254,7 @@ watch(
   () => props.modelValue,
   value => {
     if (value) {
-      applyMateriaPrima()
+      applyCompra()
     } else {
       resetForm()
     }
@@ -252,10 +262,10 @@ watch(
 )
 
 watch(
-  () => props.materiaPrima,
-  () => {
+  () => props.compra,
+  (newVal, oldVal) => {
     if (props.modelValue) {
-      applyMateriaPrima()
+      applyCompra()
     }
   },
   { deep: true }
@@ -268,7 +278,7 @@ watch(
   flex-direction: column;
   gap: 1.25rem;
   padding: 1.5rem;
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 255, 0.95));
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(240, 245, 255, 0.95));
 }
 
 .form-grid {
@@ -292,8 +302,7 @@ watch(
 }
 
 .form-field input,
-.form-field select,
-.form-field textarea {
+.form-field select {
   border: 1px solid rgba(15, 97, 255, 0.25);
   border-radius: 10px;
   padding: 0.75rem 0.85rem;
@@ -315,20 +324,10 @@ watch(
 }
 
 .form-field input:focus,
-.form-field select:focus,
-.form-field textarea:focus {
+.form-field select:focus {
   outline: none;
   border-color: rgba(15, 97, 255, 0.6);
   box-shadow: 0 0 0 3px rgba(15, 97, 255, 0.18);
-}
-
-.form-field textarea {
-  resize: vertical;
-  min-height: 120px;
-}
-
-.form-field--full {
-  grid-column: span 2;
 }
 
 .field-error {
@@ -369,23 +368,23 @@ watch(
 .modal-button--ghost {
   background: rgba(255, 255, 255, 0.2);
   color: #0f172a;
-  border-color: rgba(0, 120, 212, 0.25);
+  border-color: rgba(15, 97, 255, 0.25);
 }
 
 .modal-button--ghost:not(:disabled):hover {
-  border-color: rgba(0, 120, 212, 0.5);
+  border-color: rgba(15, 97, 255, 0.5);
   box-shadow: 0 8px 20px rgba(15, 23, 42, 0.12);
 }
 
 .modal-button--primary {
-  background: linear-gradient(135deg, #0078d4, #00a6ff);
+  background: linear-gradient(135deg, #0f62fe, #0043ce);
   color: #ffffff;
-  box-shadow: 0 10px 24px rgba(0, 118, 212, 0.35);
+  box-shadow: 0 10px 24px rgba(15, 98, 255, 0.35);
 }
 
 .modal-button--primary:not(:disabled):hover {
   transform: translateY(-1px);
-  box-shadow: 0 14px 32px rgba(0, 118, 212, 0.45);
+  box-shadow: 0 14px 32px rgba(15, 98, 255, 0.45);
 }
 
 .modal-button--primary:not(:disabled):active {
@@ -396,9 +395,9 @@ watch(
   .form-grid {
     grid-template-columns: 1fr;
   }
+}
 
-  .form-field--full {
-    grid-column: span 1;
-  }
+.form-field--full {
+  grid-column: span 2;
 }
 </style>
