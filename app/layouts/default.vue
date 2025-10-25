@@ -101,7 +101,7 @@ const menuItems = computed<MenuItem[]>(() => [
         label: 'Materia Prima',
         icon: 'mdi:cube-outline',
         to: '/compra_materia_prima'
-      }
+      },
     ]
   },
   {

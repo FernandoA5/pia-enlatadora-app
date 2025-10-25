@@ -10,6 +10,17 @@
     @submit="handleSubmit"
     @delete="handleDelete"
   >
+    <template #item.actions.extra="{ item, loading }">
+      <button
+        type="button"
+        class="action-button action-button--edit"
+        aria-label="Ver detalle de compra"
+        :disabled="loading"
+        @click.stop="handleDetalleCompra(item)">
+        <Icon name="mdi:clipboard-text-search-outline" class="action-button__icon" aria-hidden="true" />
+      </button>
+    </template>
+
     <template #item.fecha_compra="{ value }">
       <span>{{ formatDate(value) }}</span>
     </template>
@@ -180,6 +191,13 @@ const handleDelete = async (item: GenericTableItem) => {
   }
 }
 
+const handleDetalleCompra = (item: GenericTableItem) => {
+  const id = extractId(item)
+  if (id == null) return
+
+  console.log('Mostrar detalle de compra para', id, item)
+}
+
 onMounted(() => {
   fetchCompras()
   fetchProveedores()
@@ -227,3 +245,38 @@ const formatCurrency = (value: unknown) => {
   })
 }
 </script>
+
+<style scoped>
+.action-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 0.75rem;
+  border: 1px solid transparent;
+  background: rgba(15, 23, 42, 0.05);
+  color: #1d4ed8;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease, background-color 0.2s ease;
+  cursor: pointer;
+}
+
+.action-button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 20px rgba(15, 23, 42, 0.15);
+}
+
+.action-button:active {
+  transform: translateY(0);
+  box-shadow: 0 6px 14px rgba(15, 23, 42, 0.1);
+}
+
+.action-button__icon {
+  width: 1.25rem;
+  height: 1.25rem;
+}
+
+.action-button--edit {
+  background-color: transparent;
+}
+</style>

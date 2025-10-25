@@ -53,13 +53,24 @@
             }"
           />
         </template>
-        <template v-else-if="enableActions" #item.actions="{ item }">
+        <template v-else-if="enableActions" #item.actions="slotProps">
           <div class="action-buttons">
+            <template v-if="hasItemActionsExtraSlot">
+              <slot
+                name="item.actions.extra"
+                v-bind="{
+                  ...slotProps,
+                  edit: () => handleEdit(slotProps.item),
+                  remove: () => handleDelete(slotProps.item),
+                  loading: isItemActionLoading(slotProps.item)
+                }"
+              />
+            </template>
             <button
               type="button"
               class="action-button action-button--edit"
               aria-label="Editar"
-              @click.stop="handleEdit(item)"
+              @click.stop="handleEdit(slotProps.item)"
             >
               <Icon name="mdi:pencil" class="action-button__icon" aria-hidden="true" />
             </button>
@@ -67,8 +78,8 @@
               type="button"
               class="action-button action-button--delete"
               aria-label="Eliminar"
-              :disabled="isItemActionLoading(item)"
-              @click.stop="handleDelete(item)"
+              :disabled="isItemActionLoading(slotProps.item)"
+              @click.stop="handleDelete(slotProps.item)"
             >
               <Icon name="mdi:trash-can" class="action-button__icon" aria-hidden="true" />
             </button>
@@ -183,6 +194,7 @@ const searchPlaceholder = computed(() => props.searchPlaceholder)
 
 const hasHeaderActionsSlot = computed(() => Boolean(slots['header.actions']))
 const hasItemActionsSlot = computed(() => Boolean(slots['item.actions']))
+const hasItemActionsExtraSlot = computed(() => Boolean(slots['item.actions.extra']))
 const hasModalSlot = computed(() => Boolean(slots.modal))
 
 const forwardedSlotNames = computed(() => {
