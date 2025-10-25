@@ -52,6 +52,7 @@
             step="0.01"
             min="0"
             :disabled="loading"
+            readonly
             inputmode="decimal"
           >
           <p v-if="errors.total" class="field-error">{{ errors.total }}</p>
@@ -204,9 +205,7 @@ const validate = () => {
   }
 
   const totalValue = toStringValue(form.total).trim()
-  if (!totalValue) {
-    errors.total = 'Ingresa el monto total'
-  } else {
+  if (totalValue) {
     const normalized = normalizeDecimal(totalValue)
     const parsed = Number.parseFloat(normalized)
     if (!Number.isFinite(parsed) || parsed < 0) {
@@ -236,8 +235,13 @@ const handleSubmit = () => {
   const payload: Record<string, unknown> = {
     id_proveedor: parseIdProveedor(form.id_proveedor),
     fecha_compra: form.fecha_compra,
-    total: Number.parseFloat(normalizeDecimal(form.total)),
     activo: props.compra?.activo ?? true
+  }
+
+  const normalizedTotal = normalizeDecimal(form.total)
+  const parsedTotal = Number.parseFloat(normalizedTotal)
+  if (Number.isFinite(parsedTotal)) {
+    payload.total = parsedTotal
   }
 
   emit('submit', { data: payload, id: props.compra?.id ?? null })

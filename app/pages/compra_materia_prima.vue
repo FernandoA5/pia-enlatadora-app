@@ -55,32 +55,65 @@
       />
     </template>
   </Catalogo>
+
+  <DetalleFormulario
+    v-if="detalleModalVisible && selectedCompraId != null"
+    :model-value="detalleModalVisible"
+    :detalle="detalleSeleccionada"
+    :loading="detalleModalLoading"
+    :materias="materiasOptions"
+    :id-compra="selectedCompraId"
+    :compra="compraSeleccionada"
+    @update:modelValue="handleDetalleModalVisibility"
+    @submit="handleDetalleSubmit"
+  />
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import Catalogo from '~/components/Catalogos/Catalogo.vue'
 import Formulario from '~/components/Catalogos/CompraMateriaPrima/Modales/Formulario.vue'
+import DetalleFormulario from '~/components/Compras/DetalleCompra/Formulario.vue'
 import type { GenericTableItem } from '~/components/Genericos/Tablas/Tabla.vue'
 import { useComprasMateriaPrimaApi } from '~/composables/useComprasMateriaPrimaApi'
 import { useProveedoresApi } from '~/composables/useProveedoresApi'
+import { useMateriaPrimaApi } from '~/composables/useMateriaPrimaApi'
 
 const searchKeys = ['id', 'fecha_compra']
 
 const { obtenerComprasMateriaPrima, createCompraMateriaPrima, updateCompraMateriaPrima, deactivateCompraMateriaPrima } =
   useComprasMateriaPrimaApi()
 const { listProveedores } = useProveedoresApi()
+const { listMateriasPrimas } = useMateriaPrimaApi()
 
 const compras = ref<GenericTableItem[]>([])
 const loading = ref(false)
 const modalLoading = ref(false)
+const detalleModalVisible = ref(false)
+const detalleModalLoading = ref(false)
+
+type DetalleCompraLike = {
+  id?: string | number | null
+  id_compra?: string | number | null
+  cantidad?: string
+  precio_unitario?: string
+  id_materia?: string
+}
 
 type ProveedorOption = {
   label: string
   value: string | number
 }
 
+type MateriaOption = {
+  label: string
+  value: string | number
+}
+
 const proveedoresOptions = ref<ProveedorOption[]>([])
+const materiasOptions = ref<MateriaOption[]>([])
+const detalleSeleccionada = ref<DetalleCompraLike | null>(null)
+const compraSeleccionada = ref<GenericTableItem | null>(null)
 
 const fetchCompras = async () => {
   loading.value = true
@@ -142,9 +175,41 @@ const fetchProveedores = async () => {
   }
 }
 
+const fetchMaterias = async () => {
+  try {
+    const response = await listMateriasPrimas()
+    const raw = (response as { data?: unknown }).data ?? response
+
+    if (Array.isArray(raw)) {
+      materiasOptions.value = (raw as GenericTableItem[])
+        .map(item => {
+          const record = item as Record<string, unknown>
+          const valueCandidate = record.id ?? record.id_materia ?? record.value
+
+          if (typeof valueCandidate === 'number' || typeof valueCandidate === 'string') {
+            const option: MateriaOption = {
+              label: String(record.nombre ?? record.label ?? 'Materia prima sin nombre'),
+              value: String(valueCandidate)
+            }
+            return option
+          }
+
+          return null
+        })
+        .filter((option): option is MateriaOption => option !== null)
+    } else {
+      materiasOptions.value = []
+    }
+  } catch (error) {
+    console.error('Error al cargar materias primas:', error)
+    materiasOptions.value = []
+  }
+}
+
 const handleReload = () => {
   fetchCompras()
   fetchProveedores()
+  fetchMaterias()
 }
 
 const handleSubmit = async ({ data, id, closeModal }: { data: Record<string, unknown>; id?: string | number | null; closeModal: () => void }) => {
@@ -195,12 +260,15 @@ const handleDetalleCompra = (item: GenericTableItem) => {
   const id = extractId(item)
   if (id == null) return
 
-  console.log('Mostrar detalle de compra para', id, item)
+  compraSeleccionada.value = item
+  detalleSeleccionada.value = null
+  detalleModalVisible.value = true
 }
 
 onMounted(() => {
   fetchCompras()
   fetchProveedores()
+  fetchMaterias()
 })
 
 const extractId = (item: GenericTableItem) => {
@@ -216,6 +284,34 @@ const extractId = (item: GenericTableItem) => {
   }
 
   return null
+}
+
+const selectedCompraId = computed(() => {
+  const item = compraSeleccionada.value
+  if (!item) {
+    return null
+  }
+  return extractId(item)
+})
+
+const handleDetalleModalVisibility = (value: boolean) => {
+  detalleModalVisible.value = value
+  if (!value) {
+    detalleSeleccionada.value = null
+    compraSeleccionada.value = null
+  }
+}
+
+const handleDetalleSubmit = async ({ data, id }: { data: Record<string, unknown>; id?: string | number | null }) => {
+  detalleModalLoading.value = true
+  try {
+    console.log('Registrar detalle de compra', { data, id })
+    handleDetalleModalVisibility(false)
+  } catch (error) {
+    console.error('Error al guardar detalle de compra:', error)
+  } finally {
+    detalleModalLoading.value = false
+  }
 }
 
 const formatDate = (value: unknown) => {
