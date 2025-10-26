@@ -54,10 +54,10 @@
             type="number"
             step="0.01"
             min="0"
-            :disabled="loading"
-            required
+            disabled
+            readonly
           >
-          <p v-if="errors.total" class="field-error">{{ errors.total }}</p>
+          <p class="field-hint">El total se calcula automáticamente</p>
         </label>
       </div>
     </form>
@@ -129,7 +129,7 @@ const { listClientes } = useClientesApi()
 const form = reactive<PedidoFormValues>({
   id_cliente: '',
   fecha_pedido: '',
-  total: ''
+  total: 0
 })
 
 const errors = reactive<Record<string, string>>({})
@@ -199,7 +199,7 @@ const resetErrors = () => {
 const resetForm = () => {
   form.id_cliente = ''
   form.fecha_pedido = ''
-  form.total = ''
+  form.total = 0
   resetErrors()
 }
 
@@ -227,7 +227,7 @@ const applyPedido = () => {
   }
   form.id_cliente = data.id_cliente ? String(data.id_cliente) : ''
   form.fecha_pedido = formatDateForInput(data.fecha_pedido)
-  form.total = data.total ? Number(data.total) : ''
+  form.total = 0
   resetErrors()
 }
 
@@ -242,13 +242,6 @@ const validate = () => {
     errors.fecha_pedido = 'Ingresa la fecha del pedido'
   }
 
-  const totalValue = Number(form.total)
-  if (!form.total) {
-    errors.total = 'Ingresa el total del pedido'
-  } else if (isNaN(totalValue) || totalValue < 0) {
-    errors.total = 'Ingresa un total válido'
-  }
-
   return Object.keys(errors).length === 0
 }
 
@@ -260,7 +253,7 @@ const handleSubmit = () => {
   const payload: Record<string, unknown> = {
     id_cliente: Number(form.id_cliente),
     fecha_pedido: form.fecha_pedido,
-    total: Number(form.total),
+    total: 0,
     activo: props.pedido?.activo ?? true
   }
 
@@ -365,6 +358,13 @@ onMounted(() => {
   margin: 0;
   font-size: 0.75rem;
   color: #b91c1c;
+}
+
+.field-hint {
+  margin: 0;
+  font-size: 0.75rem;
+  color: #64748b;
+  font-style: italic;
 }
 
 .modal-footer {
