@@ -20,6 +20,21 @@ type CompraMateriaPrimaResponse = {
 
 type CompraMateriaPrimaUpdatePayload = Partial<CompraMateriaPrimaPayload>
 
+type DetalleCompraUpdatePayload = Partial<{
+  cantidad: number | string
+  precio_unitario: number | string
+  activo: boolean
+}>
+
+export type RegistrarDetalleCompraPayload = {
+  id_compra: CompraMateriaPrimaId
+  detalles: Array<{
+    id_materia: CompraMateriaPrimaId
+    cantidad: number
+    precio_unitario: number
+  }>
+}
+
 export const useComprasMateriaPrimaApi = () => {
   const { $api } = useNuxtApp()
 
@@ -31,6 +46,14 @@ export const useComprasMateriaPrimaApi = () => {
   const obtenerComprasMateriaPrima = async () =>
     $api('/api/obtener_compras_materia_prima', {
       method: 'GET'
+    })
+
+  const obtenerDetallesCompraPorIdCompra = async (id: CompraMateriaPrimaId) =>
+    $api('/api/obtener_detalles_compra_by_id_compra', {
+      method: 'GET',
+      query: {
+        id_compra: typeof id === 'number' ? id : String(id)
+      }
     })
 
   const getCompraMateriaPrima = async (id: CompraMateriaPrimaId) =>
@@ -65,6 +88,35 @@ export const useComprasMateriaPrimaApi = () => {
       method: 'DELETE'
     })
 
+  const registrarDetallesCompra = async (payload: RegistrarDetalleCompraPayload) =>
+    $api('/api/registrar_detalles_compra', {
+      method: 'POST',
+      body: payload
+    })
+
+  const updateDetalleCompra = async (id: CompraMateriaPrimaId, payload: DetalleCompraUpdatePayload) =>
+    $api(`/api/detalle_compras/${id}`, {
+      method: 'PUT',
+      body: {
+        detalle_compra: payload
+      }
+    })
+
+  const deactivateDetalleCompra = async (
+    id: CompraMateriaPrimaId,
+    payload: { cantidad: number | string; precio_unitario: number | string }
+  ) => {
+    if (payload === undefined || payload === null) {
+      throw new Error('Se requiere payload para desactivar el detalle de compra')
+    }
+
+    return updateDetalleCompra(id, {
+      cantidad: payload.cantidad,
+      precio_unitario: payload.precio_unitario,
+      activo: false
+    })
+  }
+
   return {
     listComprasMateriaPrima,
     obtenerComprasMateriaPrima,
@@ -72,6 +124,10 @@ export const useComprasMateriaPrimaApi = () => {
     createCompraMateriaPrima,
     updateCompraMateriaPrima,
     deactivateCompraMateriaPrima,
-    deleteCompraMateriaPrima
+    deleteCompraMateriaPrima,
+    registrarDetallesCompra,
+    obtenerDetallesCompraPorIdCompra,
+    updateDetalleCompra,
+    deactivateDetalleCompra
   }
 }

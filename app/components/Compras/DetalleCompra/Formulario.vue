@@ -63,7 +63,7 @@
         <button
           type="button"
           class="modal-button modal-button--success"
-          :disabled="loading"
+          :disabled="loading || !canAgregarDetalle"
           @click="agregarDetalle"
         >
           Agregar
@@ -123,7 +123,7 @@
         <button
           type="button"
           class="modal-button modal-button--primary"
-          :disabled="loading"
+          :disabled="loading || !canSubmit"
           @click="handleSubmit"
         >
           {{ loading ? 'Guardando…' : submitLabel }}
@@ -137,6 +137,7 @@
 import { computed, reactive, ref, watch } from 'vue'
 import GenericModal from '~/components/Genericos/Modal/Modal.vue'
 import Tabla, { type GenericTableHeader, type GenericTableItem } from '~/components/Genericos/Tablas/Tabla.vue'
+import { useComprasMateriaPrimaApi } from '~/composables/useComprasMateriaPrimaApi'
 
 type OptionValue = {
   label: string
@@ -154,6 +155,15 @@ type DetalleCompraLike = Partial<DetalleCompraForm> & {
   id_compra?: number | string | null
 }
 
+export type DetalleCompraGuardado = {
+  id?: number | string | null
+  id_compra?: number | string | null
+  id_materia?: string | number | null
+  cantidad?: number | string | null
+  precio_unitario?: number | string | null
+  materia?: string | null
+}
+
 type DetalleRow = GenericTableItem & {
   uid: string
   detalleId?: string | number | null
@@ -162,6 +172,18 @@ type DetalleRow = GenericTableItem & {
   cantidad: number
   precio_unitario: number
   subtotal: number
+  acciones: string
+  persisted: boolean
+  updated: boolean
+}
+
+export type DetalleSubmitPayload = {
+  id_compra: string | number
+  detalles: Array<{
+    id_materia: string | number
+    cantidad: number
+    precio_unitario: number
+  }>
 }
 
 const props = withDefaults(
@@ -172,18 +194,22 @@ const props = withDefaults(
     materias?: OptionValue[]
     idCompra: string | number
     compra?: GenericTableItem | null
+    detallesGuardados?: DetalleCompraGuardado[]
   }>(),
   {
     detalle: null,
     loading: false,
     materias: () => [],
-    compra: null
+    compra: null,
+    detallesGuardados: () => []
   }
 )
 
 const emit = defineEmits<{
   (event: 'update:modelValue', value: boolean): void
-  (event: 'submit', payload: { data: Record<string, unknown>; id?: number | string | null }): void
+  (event: 'submit', payload: DetalleSubmitPayload): void
+  (event: 'close'): void
+  (event: 'updated'): void
 }>()
 
 const form = reactive<DetalleCompraForm>({
@@ -204,6 +230,33 @@ const detalleHeaders: GenericTableHeader[] = [
 
 const detalles = ref<DetalleRow[]>([])
 let detalleUid = 0
+
+const { updateDetalleCompra, deactivateDetalleCompra } = useComprasMateriaPrimaApi()
+
+const hasNewDetalles = computed(() => detalles.value.some(detalle => !detalle.persisted))
+const hasUpdatedDetalles = computed(() => detalles.value.some(detalle => detalle.persisted && detalle.updated))
+const canSubmit = computed(() => hasNewDetalles.value || hasUpdatedDetalles.value)
+const canAgregarDetalle = computed(() => {
+  if (props.loading) {
+    return false
+  }
+
+  const cantidadValue = parseNumeric(form.cantidad)
+  if (cantidadValue === null || cantidadValue <= 0) {
+    return false
+  }
+
+  const precioValue = parseNumeric(form.precio_unitario)
+  if (precioValue === null || precioValue < 0) {
+    return false
+  }
+
+  if (!toStringValue(form.id_materia).trim()) {
+    return false
+  }
+
+  return true
+})
 
 const modalTitle = computed(() => (props.detalle?.id ? 'Editar detalle de compra' : 'Registrar detalle de compra'))
 const submitLabel = computed(() => (props.detalle?.id ? 'Actualizar' : 'Registrar'))
@@ -285,15 +338,14 @@ const parseNumeric = (value: string) => {
   return Number.isFinite(parsed) ? parsed : null
 }
 
-const parseIdMateria = (value: string) => {
-  if (value === '') {
-    return null
+const parseIdMateria = (value: string): string | number => {
+  const trimmed = value.trim()
+  if (trimmed === '') {
+    return ''
   }
-  const numeric = Number(value)
-  if (Number.isNaN(numeric)) {
-    return value
-  }
-  return numeric
+
+  const numeric = Number(trimmed)
+  return Number.isFinite(numeric) ? numeric : trimmed
 }
 
 const findMateriaLabel = (value: string) => {
@@ -306,17 +358,22 @@ const createDetalleRow = (params: {
   cantidad: number
   precioUnitario: number
   detalleId?: string | number | null
+  materiaNombre?: string | null
+  persisted?: boolean
+  updated?: boolean
 }) => {
   const subtotal = Number((params.cantidad * params.precioUnitario).toFixed(2))
   return {
     uid: params.detalleId != null ? `detalle-${params.detalleId}` : `detalle-${++detalleUid}`,
     detalleId: params.detalleId ?? null,
     id_materia: params.idMateria,
-    materia: findMateriaLabel(params.idMateria),
+    materia: params.materiaNombre ?? findMateriaLabel(params.idMateria),
     cantidad: params.cantidad,
     precio_unitario: params.precioUnitario,
     subtotal,
-    acciones: ''
+    acciones: '',
+    persisted: Boolean(params.persisted),
+    updated: Boolean(params.updated)
   } satisfies DetalleRow
 }
 
@@ -324,7 +381,50 @@ const resetDetalles = () => {
   detalles.value = []
 }
 
-const agregarDetalle = () => {
+const syncDetallesGuardados = () => {
+  if (!props.modelValue) {
+    return
+  }
+
+  const registros = props.detallesGuardados ?? []
+
+  if (!Array.isArray(registros) || registros.length === 0) {
+    resetDetalles()
+    return
+  }
+
+  const rows: DetalleRow[] = []
+
+  registros.forEach(registro => {
+    const idMateria = toStringValue(registro.id_materia ?? '')
+    if (!idMateria) {
+      return
+    }
+
+    const cantidad = parseNumeric(toStringValue(registro.cantidad ?? ''))
+    const precioUnitario = parseNumeric(toStringValue(registro.precio_unitario ?? ''))
+
+    if (cantidad === null || precioUnitario === null) {
+      return
+    }
+
+    const row = createDetalleRow({
+      idMateria,
+      cantidad,
+      precioUnitario,
+      detalleId: registro.id ?? registro.id_compra ?? null,
+      materiaNombre: registro.materia ?? null,
+      persisted: true,
+      updated: false
+    })
+
+    rows.push(row)
+  })
+
+  detalles.value = rows
+}
+
+const agregarDetalle = async () => {
   if (!validate()) {
     return
   }
@@ -337,20 +437,17 @@ const agregarDetalle = () => {
   }
 
   const idMateria = form.id_materia
-  const existingIndex = detalles.value.findIndex(detalle => detalle.id_materia === idMateria)
-  const detalleId = existingIndex >= 0 ? detalles.value[existingIndex]?.detalleId ?? null : null
-  const nuevoDetalle = createDetalleRow({
+  const detalleNuevo = createDetalleRow({
     idMateria,
     cantidad,
     precioUnitario,
-    detalleId
+    detalleId: null,
+    materiaNombre: null,
+    persisted: false,
+    updated: false
   })
 
-  if (existingIndex >= 0) {
-    detalles.value.splice(existingIndex, 1, nuevoDetalle)
-  } else {
-    detalles.value.push(nuevoDetalle)
-  }
+  detalles.value.push(detalleNuevo)
 
   delete errors.detalles
 
@@ -358,9 +455,32 @@ const agregarDetalle = () => {
   form.precio_unitario = ''
 }
 
-const eliminarDetalle = (uid: string) => {
-  detalles.value = detalles.value.filter(detalle => {
-    const currentUid = typeof detalle.uid === 'string' ? detalle.uid : String(detalle.uid ?? '')
+const eliminarDetalle = async (uid: string) => {
+  const detalle = detalles.value.find(item => {
+    const currentUid = typeof item.uid === 'string' ? item.uid : String(item.uid ?? '')
+    return currentUid === uid
+  })
+
+  if (!detalle) {
+    return
+  }
+
+  if (detalle.persisted && detalle.detalleId != null) {
+    try {
+      await deactivateDetalleCompra(detalle.detalleId, {
+        cantidad: detalle.cantidad,
+        precio_unitario: detalle.precio_unitario
+      })
+      emit('updated')
+    } catch (error) {
+      console.error('Error al desactivar detalle de compra:', error)
+      errors.detalles = 'No se pudo desactivar el detalle. Intenta nuevamente.'
+      return
+    }
+  }
+
+  detalles.value = detalles.value.filter(item => {
+    const currentUid = typeof item.uid === 'string' ? item.uid : String(item.uid ?? '')
     return currentUid !== uid
   })
 }
@@ -393,19 +513,24 @@ const handleSubmit = () => {
     return
   }
 
-  const detallesPayload = detalles.value.map(detalle => ({
-    id: detalle.detalleId ?? null,
-    id_materia: parseIdMateria(detalle.id_materia),
-    cantidad: detalle.cantidad,
-    precio_unitario: detalle.precio_unitario
-  }))
+  const detallesNuevos = detalles.value.filter(detalle => !detalle.persisted)
 
-  const payload: Record<string, unknown> = {
-    id_compra: props.idCompra,
-    detalles: detallesPayload
+  if (detallesNuevos.length === 0) {
+    delete errors.detalles
+    emit('update:modelValue', false)
+    return
   }
 
-  emit('submit', { data: payload, id: props.detalle?.id ?? null })
+  const detallesPayload = detallesNuevos.map(detalle => ({
+    id_materia: parseIdMateria(detalle.id_materia),
+    cantidad: Number(detalle.cantidad.toFixed(4)),
+    precio_unitario: Number(detalle.precio_unitario.toFixed(4))
+  }))
+
+  emit('submit', {
+    id_compra: props.idCompra,
+    detalles: detallesPayload
+  })
 }
 
 const handleClose = () => {
@@ -413,6 +538,7 @@ const handleClose = () => {
     return
   }
   emit('update:modelValue', false)
+  emit('close')
 }
 
 watch(
@@ -420,6 +546,7 @@ watch(
   value => {
     if (value) {
       applyDetalle()
+      syncDetallesGuardados()
     } else {
       resetForm()
     }
@@ -439,10 +566,20 @@ watch(
 watch(
   () => props.materias,
   () => {
-    detalles.value = detalles.value.map(detalle => ({
+    const actualizados: DetalleRow[] = detalles.value.map(detalle => ({
       ...detalle,
       materia: findMateriaLabel(detalle.id_materia)
-    })) as DetalleRow[]
+    }))
+
+    detalles.value = actualizados
+  },
+  { deep: true }
+)
+
+watch(
+  () => props.detallesGuardados,
+  () => {
+    syncDetallesGuardados()
   },
   { deep: true }
 )

@@ -24,7 +24,7 @@
               Selecciona un proveedor
             </option>
             <option
-              v-for="option in proveedores"
+              v-for="option in proveedoresCombinados"
               :key="option.value"
               :value="String(option.value)"
             >
@@ -84,8 +84,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, watch } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import GenericModal from '~/components/Genericos/Modal/Modal.vue'
+import { useProveedoresApi } from '~/composables/useProveedoresApi'
 
 type OptionValue = {
   label: string
@@ -121,6 +122,33 @@ const emit = defineEmits<{
   (event: 'update:modelValue', value: boolean): void
   (event: 'submit', payload: { data: Record<string, unknown>; id?: number | string | null }): void
 }>()
+
+const { listProveedores, getProveedor } = useProveedoresApi()
+
+const proveedoresLocales = ref<OptionValue[]>([])
+const proveedoresCombinados = computed<OptionValue[]>(() => {
+  const mapa = new Map<string, OptionValue>()
+
+  const externos = props.proveedores ?? []
+  externos.forEach(option => {
+    const clave = String(option.value)
+    if (!mapa.has(clave)) {
+      mapa.set(clave, {
+        label: option.label,
+        value: option.value
+      })
+    }
+  })
+
+  proveedoresLocales.value.forEach(option => {
+    const clave = String(option.value)
+    if (!mapa.has(clave)) {
+      mapa.set(clave, option)
+    }
+  })
+
+  return Array.from(mapa.values())
+})
 
 const form = reactive<CompraMateriaPrimaForm>({
   id_proveedor: '',
@@ -254,11 +282,88 @@ const handleClose = () => {
   emit('update:modelValue', false)
 }
 
+const fetchProveedoresLocales = async () => {
+  if ((props.proveedores?.length ?? 0) > 0) {
+    proveedoresLocales.value = []
+    return
+  }
+
+  try {
+    const response = await listProveedores()
+    const raw = (response as { data?: unknown }).data ?? response
+
+    if (Array.isArray(raw)) {
+      proveedoresLocales.value = (raw as Array<Record<string, unknown>>)
+        .map(item => {
+          const record = item as Record<string, unknown>
+          const valueCandidate = record.id ?? record.id_proveedor ?? record.value
+
+          if (typeof valueCandidate === 'string' || typeof valueCandidate === 'number') {
+            return {
+              label: String(record.nombre ?? record.label ?? 'Proveedor sin nombre'),
+              value: typeof valueCandidate === 'number' ? valueCandidate : String(valueCandidate)
+            } satisfies OptionValue
+          }
+
+          return null
+        })
+        .filter((option): option is OptionValue => option !== null)
+    } else {
+      proveedoresLocales.value = []
+    }
+  } catch (error) {
+    console.error('Error al cargar proveedores:', error)
+    proveedoresLocales.value = []
+  }
+}
+
+const ensureProveedorSeleccionado = async () => {
+  const currentId = toStringValue(form.id_proveedor)
+  if (!currentId) {
+    return
+  }
+
+  const exists = proveedoresCombinados.value.some(option => String(option.value) === currentId)
+  if (exists) {
+    return
+  }
+
+  try {
+    const response = await getProveedor(currentId)
+    const raw = (response as { data?: unknown }).data ?? response
+
+    if (raw && typeof raw === 'object') {
+      const record = raw as Record<string, unknown>
+      const valueCandidate = record.id ?? record.id_proveedor ?? record.value ?? currentId
+
+      if (typeof valueCandidate === 'string' || typeof valueCandidate === 'number') {
+        const option: OptionValue = {
+          label: String(record.nombre ?? record.label ?? 'Proveedor sin nombre'),
+          value: typeof valueCandidate === 'number' ? valueCandidate : String(valueCandidate)
+        }
+
+        const clave = String(option.value)
+        const restantes = proveedoresLocales.value.filter(current => String(current.value) !== clave)
+        proveedoresLocales.value = [...restantes, option]
+      }
+    }
+  } catch (error) {
+    console.error('Error al obtener proveedor seleccionado:', error)
+  }
+}
+
 watch(
   () => props.modelValue,
   value => {
     if (value) {
-      applyCompra()
+      fetchProveedoresLocales()
+        .catch(error => {
+          console.error('Error cargando proveedores locales:', error)
+        })
+        .finally(() => {
+          applyCompra()
+          ensureProveedorSeleccionado()
+        })
     } else {
       resetForm()
     }
@@ -270,6 +375,7 @@ watch(
   (newVal, oldVal) => {
     if (props.modelValue) {
       applyCompra()
+      ensureProveedorSeleccionado()
     }
   },
   { deep: true }

@@ -64,8 +64,11 @@
     :materias="materiasOptions"
     :id-compra="selectedCompraId"
     :compra="compraSeleccionada"
+    :detalles-guardados="detallesGuardados"
     @update:modelValue="handleDetalleModalVisibility"
     @submit="handleDetalleSubmit"
+    @close="handleDetalleModalClosed"
+    @updated="handleDetalleModalUpdated"
   />
 </template>
 
@@ -75,13 +78,22 @@ import Catalogo from '~/components/Catalogos/Catalogo.vue'
 import Formulario from '~/components/Catalogos/CompraMateriaPrima/Modales/Formulario.vue'
 import DetalleFormulario from '~/components/Compras/DetalleCompra/Formulario.vue'
 import type { GenericTableItem } from '~/components/Genericos/Tablas/Tabla.vue'
-import { useComprasMateriaPrimaApi } from '~/composables/useComprasMateriaPrimaApi'
+import { useComprasMateriaPrimaApi, type RegistrarDetalleCompraPayload } from '~/composables/useComprasMateriaPrimaApi'
+import type { DetalleCompraGuardado } from '~/components/Compras/DetalleCompra/Formulario.vue'
+import type { DetalleSubmitPayload } from '~/components/Compras/DetalleCompra/Formulario.vue'
 import { useProveedoresApi } from '~/composables/useProveedoresApi'
 import { useMateriaPrimaApi } from '~/composables/useMateriaPrimaApi'
 
 const searchKeys = ['id', 'fecha_compra']
 
-const { obtenerComprasMateriaPrima, createCompraMateriaPrima, updateCompraMateriaPrima, deactivateCompraMateriaPrima } =
+const {
+  obtenerComprasMateriaPrima,
+  obtenerDetallesCompraPorIdCompra,
+  createCompraMateriaPrima,
+  updateCompraMateriaPrima,
+  deactivateCompraMateriaPrima,
+  registrarDetallesCompra
+} =
   useComprasMateriaPrimaApi()
 const { listProveedores } = useProveedoresApi()
 const { listMateriasPrimas } = useMateriaPrimaApi()
@@ -114,6 +126,7 @@ const proveedoresOptions = ref<ProveedorOption[]>([])
 const materiasOptions = ref<MateriaOption[]>([])
 const detalleSeleccionada = ref<DetalleCompraLike | null>(null)
 const compraSeleccionada = ref<GenericTableItem | null>(null)
+const detallesGuardados = ref<DetalleCompraGuardado[]>([])
 
 const fetchCompras = async () => {
   loading.value = true
@@ -145,6 +158,10 @@ const fetchCompras = async () => {
 }
 
 const fetchProveedores = async () => {
+  if (proveedoresOptions.value.length > 0) {
+    return
+  }
+
   try {
     const response = await listProveedores()
     const raw = (response as { data?: unknown }).data ?? response
@@ -176,6 +193,10 @@ const fetchProveedores = async () => {
 }
 
 const fetchMaterias = async () => {
+  if (materiasOptions.value.length > 0) {
+    return
+  }
+
   try {
     const response = await listMateriasPrimas()
     const raw = (response as { data?: unknown }).data ?? response
@@ -208,13 +229,13 @@ const fetchMaterias = async () => {
 
 const handleReload = () => {
   fetchCompras()
-  fetchProveedores()
-  fetchMaterias()
 }
 
 const handleSubmit = async ({ data, id, closeModal }: { data: Record<string, unknown>; id?: string | number | null; closeModal: () => void }) => {
   modalLoading.value = true
   try {
+    await fetchProveedores()
+
     const rawIdProveedor = data.id_proveedor
     const stringId = String(rawIdProveedor ?? '').trim()
     const idProveedor = stringId
@@ -262,13 +283,35 @@ const handleDetalleCompra = (item: GenericTableItem) => {
 
   compraSeleccionada.value = item
   detalleSeleccionada.value = null
+  detallesGuardados.value = []
   detalleModalVisible.value = true
+  detalleModalLoading.value = true
+
+  fetchMaterias()
+
+  obtenerDetallesCompraPorIdCompra(id)
+    .then(response => {
+      const raw = (response as { data?: unknown }).data ?? response
+
+      if (Array.isArray(raw)) {
+        detallesGuardados.value = raw as DetalleCompraGuardado[]
+      } else if (raw) {
+        detallesGuardados.value = [raw as DetalleCompraGuardado]
+      } else {
+        detallesGuardados.value = []
+      }
+    })
+    .catch(error => {
+      console.error('Error al obtener detalles de la compra:', error)
+      detallesGuardados.value = []
+    })
+    .finally(() => {
+      detalleModalLoading.value = false
+    })
 }
 
 onMounted(() => {
   fetchCompras()
-  fetchProveedores()
-  fetchMaterias()
 })
 
 const extractId = (item: GenericTableItem) => {
@@ -299,13 +342,53 @@ const handleDetalleModalVisibility = (value: boolean) => {
   if (!value) {
     detalleSeleccionada.value = null
     compraSeleccionada.value = null
+    detallesGuardados.value = []
   }
 }
 
-const handleDetalleSubmit = async ({ data, id }: { data: Record<string, unknown>; id?: string | number | null }) => {
+const handleDetalleModalClosed = async () => {
+  await fetchCompras()
+}
+
+const handleDetalleModalUpdated = async () => {
+  await fetchCompras()
+}
+
+const toNumericIfPossible = (value: string | number) => {
+  if (typeof value === 'number') {
+    return value
+  }
+
+  const trimmed = value.trim()
+  if (trimmed === '') {
+    return ''
+  }
+
+  const parsed = Number(trimmed)
+  return Number.isFinite(parsed) ? parsed : trimmed
+}
+
+const normalizeDecimal = (value: number) => Number(value.toFixed(4))
+
+const handleDetalleSubmit = async (payload: DetalleSubmitPayload) => {
   detalleModalLoading.value = true
   try {
-    console.log('Registrar detalle de compra', { data, id })
+    const idCompraValue = toNumericIfPossible(payload.id_compra)
+
+    const detallesPayload: RegistrarDetalleCompraPayload['detalles'] = payload.detalles.map(
+      (detalle: DetalleSubmitPayload['detalles'][number]) => ({
+        id_materia: toNumericIfPossible(detalle.id_materia),
+        cantidad: normalizeDecimal(detalle.cantidad),
+        precio_unitario: normalizeDecimal(detalle.precio_unitario)
+      })
+    )
+
+    await registrarDetallesCompra({
+      id_compra: idCompraValue ?? payload.id_compra,
+      detalles: detallesPayload
+    })
+
+    await fetchCompras()
     handleDetalleModalVisibility(false)
   } catch (error) {
     console.error('Error al guardar detalle de compra:', error)
