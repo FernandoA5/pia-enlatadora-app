@@ -94,6 +94,17 @@ const menuItems = computed<MenuItem[]>(() => [
     to: '/'
   },
   {
+    label: 'Pedido',
+    icon: 'mdi:cart-outline',
+    children: [
+      {
+        label: 'Pedido',
+        icon: 'mdi:clipboard-text-outline',
+        to: '/pedido'
+      }
+    ]
+  },
+  {
     label: 'Produccion',
     icon: 'mdi:factory',
     children: [
