@@ -6,6 +6,7 @@
     :search-keys="searchKeys"
     :extract-item-id="extractId"
     :excluded-columns="['id_producto']"
+    :should-show-edit-button="shouldShowEditButton"
     @reload="handleReload"
     @submit="handleSubmit"
     @delete="handleDelete"
@@ -30,6 +31,18 @@
       </span>
     </template>
 
+    <template #item.actions.extra="{ item, loading }">
+      <button
+        type="button"
+        class="action-button action-button--control"
+        aria-label="Registrar control de calidad"
+        :disabled="loading"
+        @click.stop="handleControlCalidad(item)"
+      >
+        <Icon name="mdi:clipboard-check-outline" class="action-button__icon" aria-hidden="true" />
+      </button>
+    </template>
+
     <template #modal="{ visible, setVisible, selectedItem, submit }">
       <ProduccionModal
         :model-value="visible"
@@ -41,15 +54,28 @@
       />
     </template>
   </Catalogo>
+
+  <ControlCalidadFormulario
+    v-if="controlCalidadModalVisible && selectedProduccionId != null"
+    :model-value="controlCalidadModalVisible"
+    :control="controlCalidadSeleccionada"
+    :loading="controlCalidadModalLoading"
+    :id-produccion="selectedProduccionId"
+    @update:modelValue="handleControlCalidadModalVisibility"
+    @submit="handleControlCalidadSubmit"
+  />
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import Catalogo from '~/components/Catalogos/Catalogo.vue'
 import ProduccionModal from '~/components/Catalogos/Produccion/Modales/Registrar.vue'
+import ControlCalidadFormulario from '~/components/Produccion/ControlesCalidad/Formulario.vue'
 import type { GenericTableItem } from '~/components/Genericos/Tablas/Tabla.vue'
 import { useProduccionApi } from '~/composables/useProduccionApi'
 import { useProductosApi } from '~/composables/useProductosApi'
+import { ProduccionEstado } from '~/types/produccion'
+import { CONTROL_CALIDAD_RESULTADO_OPTIONS } from '~/types/controlCalidad'
 
 const searchKeys = ['estado']
 
@@ -57,7 +83,10 @@ const {
   listProducciones,
   createProduccion,
   updateProduccion,
-  deactivateProduccion
+  deactivateProduccion,
+  getControlCalidadByProduccion,
+  createControlCalidad,
+  updateControlCalidad
 } = useProduccionApi()
 
 const { listProductos } = useProductosApi()
@@ -66,6 +95,16 @@ const producciones = ref<GenericTableItem[]>([])
 const loading = ref(false)
 const modalLoading = ref(false)
 const productos = ref<Array<{ id: string | number; nombre: string }>>([])
+const controlCalidadModalVisible = ref(false)
+const controlCalidadModalLoading = ref(false)
+type ControlCalidadLike = {
+  id?: number | string | null
+  resultado?: string | null
+  observaciones?: string | null
+  fecha_control?: string | null
+}
+const controlCalidadSeleccionada = ref<ControlCalidadLike | null>(null)
+const produccionSeleccionada = ref<GenericTableItem | null>(null)
 
 const formatCantidad = (value: unknown) => {
   const parsed = Number(value)
@@ -135,6 +174,154 @@ const handleReload = () => {
   fetchProducciones()
 }
 
+const toOptionalString = (value: unknown) => {
+  if (value === null || value === undefined) {
+    return null
+  }
+  const stringValue = String(value)
+  return stringValue.trim().length > 0 ? stringValue : null
+}
+
+const extractControlCalidad = (item: GenericTableItem): ControlCalidadLike | null => {
+  const record = item as Record<string, unknown>
+  const idCandidate = record.id_control ?? record.control_id ?? null
+  const resultadoCandidate =
+    record.resultado ?? record.resultado_control ?? record.control_resultado ?? null
+  const observacionesCandidate =
+    record.observaciones ?? record.control_observaciones ?? record.observaciones_control ?? null
+  const fechaControlCandidate =
+    record.fecha_control ?? record.control_fecha_control ?? record.fecha_revision ?? null
+
+  const resultado = toOptionalString(resultadoCandidate)
+  const observaciones = toOptionalString(observacionesCandidate)
+  const fecha_control = toOptionalString(fechaControlCandidate)
+
+  if (resultado === null && observaciones === null && idCandidate === null && fecha_control === null) {
+    return null
+  }
+
+  return {
+    id: typeof idCandidate === 'string' || typeof idCandidate === 'number' ? idCandidate : null,
+    resultado,
+    observaciones,
+    fecha_control
+  }
+}
+
+const adaptControlCalidadRecord = (raw: unknown): ControlCalidadLike | null => {
+  if (Array.isArray(raw)) {
+    const [first] = raw
+    return adaptControlCalidadRecord(first)
+  }
+
+  if (!raw || typeof raw !== 'object') {
+    return null
+  }
+
+  const record = raw as Record<string, unknown>
+
+  const id = (() => {
+    const candidate = record.id ?? record.id_control
+    return typeof candidate === 'number' || typeof candidate === 'string' ? candidate : null
+  })()
+
+  const resultado = toOptionalString(record.resultado)
+  const observaciones = toOptionalString(record.observaciones)
+  const fecha_control = toOptionalString(record.fecha_control)
+
+  if (id === null && resultado === null && observaciones === null && fecha_control === null) {
+    return null
+  }
+
+  return {
+    id,
+    resultado,
+    observaciones,
+    fecha_control
+  }
+}
+
+const handleControlCalidad = async (item: GenericTableItem) => {
+  produccionSeleccionada.value = item
+  controlCalidadSeleccionada.value = extractControlCalidad(item)
+  controlCalidadModalVisible.value = true
+
+  const id = extractId(item)
+  if (id == null) {
+    return
+  }
+
+  controlCalidadModalLoading.value = true
+  try {
+    const response = await getControlCalidadByProduccion(id)
+    const raw = (response as { data?: unknown }).data ?? response
+    controlCalidadSeleccionada.value = adaptControlCalidadRecord(raw)
+  } catch (error) {
+    console.error('Error al obtener control de calidad:', error)
+    controlCalidadSeleccionada.value = null
+  } finally {
+    controlCalidadModalLoading.value = false
+  }
+}
+
+const handleControlCalidadModalVisibility = (value: boolean) => {
+  controlCalidadModalVisible.value = value
+  if (!value) {
+    controlCalidadSeleccionada.value = null
+    produccionSeleccionada.value = null
+  }
+}
+
+const handleControlCalidadSubmit = async ({
+  data,
+  id
+}: {
+  data: Record<string, unknown>
+  id?: string | number | null
+}) => {
+  controlCalidadModalLoading.value = true
+  try {
+    const resolvedProduccionId = selectedProduccionId.value ?? data.id_produccion
+
+    if (resolvedProduccionId === null || resolvedProduccionId === undefined) {
+      throw new Error('No se pudo determinar el ID de la producción para el control de calidad')
+    }
+
+    const numericProduccionId = (() => {
+      if (typeof resolvedProduccionId === 'number') {
+        return resolvedProduccionId
+      }
+      const parsed = Number(resolvedProduccionId)
+      return Number.isNaN(parsed) ? String(resolvedProduccionId) : parsed
+    })()
+
+    const basePayload = {
+      resultado: String(data.resultado ?? '').trim(),
+      observaciones: toOptionalString(data.observaciones ?? '') ?? '',
+      fecha_control: String(data.fecha_control ?? '').trim(),
+      activo: Boolean(data.activo ?? true),
+      id_produccion: numericProduccionId
+    }
+
+    if (!basePayload.resultado || !basePayload.fecha_control || basePayload.id_produccion == null) {
+      throw new Error('Datos incompletos para registrar el control de calidad')
+    }
+
+    if (id != null) {
+      await updateControlCalidad(id, basePayload)
+    } else {
+      await createControlCalidad(basePayload)
+    }
+
+    await fetchProducciones()
+  } catch (error) {
+    console.error('Error al guardar control de calidad:', error)
+  } finally {
+    controlCalidadModalLoading.value = false
+    handleControlCalidadModalVisibility(false)
+  }
+}
+
 const handleSubmit = async ({
   data,
   id,
@@ -196,8 +383,78 @@ const extractId = (item: GenericTableItem) => {
   return null
 }
 
+const selectedProduccionId = computed(() => {
+  const item = produccionSeleccionada.value
+  if (!item) {
+    return null
+  }
+  return extractId(item)
+})
+
+const shouldShowEditButton = (item: GenericTableItem) => {
+  const record = item as Record<string, unknown>
+  const estado = String(record.estado ?? '').trim()
+
+  if (!estado) {
+    return true
+  }
+
+  if (CONTROL_CALIDAD_RESULTADO_OPTIONS.includes(estado as (typeof CONTROL_CALIDAD_RESULTADO_OPTIONS)[number])) {
+    return false
+  }
+
+  return Object.values(ProduccionEstado).includes(estado as ProduccionEstado)
+}
+
 onMounted(() => {
   fetchProducciones()
   fetchProductos()
 })
 </script>
+
+<style scoped>
+.action-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 0.75rem;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #0369a1;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease, background-color 0.2s ease;
+  cursor: pointer;
+}
+
+.action-button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 20px rgba(7, 89, 133, 0.2);
+}
+
+.action-button:active {
+  transform: translateY(0);
+  box-shadow: 0 6px 14px rgba(7, 89, 133, 0.12);
+}
+
+.action-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+  box-shadow: none;
+  transform: none;
+}
+
+.action-button__icon {
+  width: 1.25rem;
+  height: 1.25rem;
+}
+
+.action-button--control {
+  color: #0369a1;
+}
+
+.action-button--control:not(:disabled):hover {
+  border-color: rgba(14, 165, 233, 0.5);
+  background: transparent;
+}
+</style>

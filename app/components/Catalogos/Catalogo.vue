@@ -67,6 +67,7 @@
               />
             </template>
             <button
+              v-if="!shouldShowEditButton || shouldShowEditButton(slotProps.item)"
               type="button"
               class="action-button action-button--edit"
               aria-label="Editar"
@@ -75,6 +76,7 @@
               <Icon name="mdi:pencil" class="action-button__icon" aria-hidden="true" />
             </button>
             <button
+              v-if="!shouldShowDeleteButton || shouldShowDeleteButton(slotProps.item)"
               type="button"
               class="action-button action-button--delete"
               aria-label="Eliminar"
@@ -128,6 +130,8 @@ const props = withDefaults(
     extractItemId?: (item: GenericTableItem) => string | number | null
     searchKeys?: string[]
     defaultSearchKeys?: string[]
+    shouldShowEditButton?: (item: GenericTableItem) => boolean
+    shouldShowDeleteButton?: (item: GenericTableItem) => boolean
   }>(),
   {
     items: () => [],
